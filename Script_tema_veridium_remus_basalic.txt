@@ -1,0 +1,275 @@
+==========================================================================
+import pandas as pd
+import numpy as np
+import re
+
+==========================================================================
+
+# Incarcarea seturilor de date (Randurile care contin mai multe coloane decat trebuie sunt omise).
+
+facebook_data = pd.read_csv('facebook_dataset.csv', on_bad_lines='warn')
+google_data = pd.read_csv('google_dataset.csv', on_bad_lines='warn', low_memory=False)
+website_data = pd.read_csv('website_dataset.csv', delimiter=';')
+
+==========================================================================
+
+# Explorarea seturilor de date
+# >> Iterez printr-o listă de seturi de date, pentru a afișa informații utile despre fiecare set de date.
+
+for name, df in [('Facebook', facebook_data), ('Google', google_data), ('Website', website_data)]:
+    print(f"{name} dataset shape: {df.shape}")
+    print(f"{name} dataset columns: {df.columns.tolist()}")
+    print(f"{name} dataset info:")
+    df.info()
+    print("\n")
+
+facebook_data.head()
+google_data.head()
+website_data.head()
+
+==========================================================================
+
+# Curatarea seturilor de date
+  # 1.Definirea functiilor necesare pentru procesul de curatare
+
+def clean_dataset(df):
+    # Fac o copie, pentru a evita modificarea dataframe-ului original. Se asigura astfel integritatea datelor originale
+    df = df.copy()
+
+    # Standardizarea numelor coloanelor. Pentru consistenta, numele coloanelor sunt transformate sa contina doar litere mici, iar spatiile libere sunt inlocuite cu simbolul '_'
+    df.columns = df.columns.str.lower().str.replace(' ', '_')
+
+    # Curatarea numelor companiilor (pentru coloanele "name" și "legal_name")
+    if 'name' in df.columns:
+        # Convertirea la litere mici pentru a elimina diferențele de capitalizare
+        df['name'] = df['name'].astype(str).str.lower()
+        # Eliminarea termenilor precum "LLC", "Inc.", "Corp.", "Ltd." etc., deoarece acestia pot varia intre surse
+        df['name'] = df['name'].str.replace(r'\b(llc|inc\.|corp\.|ltd\.|limited|gmbh)\b', '', regex=True)
+        # Eliminarea caracterelor speciale, pastrand doar literele si spatiile
+        df['name'] = df['name'].str.replace(r'[^\w\s]', '', regex=True)
+        # Eliminarea spatiilor de la inceputul si de la sfarsitul numelor de companii
+        df['name'] = df['name'].str.strip()
+
+    if 'legal_name' in df.columns:
+        df['legal_name'] = df['legal_name'].astype(str).str.lower()
+        df['legal_name'] = df['legal_name'].str.replace(r'\b(llc|inc\.|corp\.|ltd\.|limited|gmbh)\b', '', regex=True)
+        df['legal_name'] = df['legal_name'].str.replace(r'[^\w\s]', '', regex=True)
+        df['legal_name'] = df['legal_name'].str.strip()
+
+    # Curatarea coloanelor asociate adreselor
+    if 'address' in df.columns:
+        df['address'] = df['address'].astype(str).str.lower()
+        # Eliminarea caracterelor speciale, păstrând doar literele, numerele și virgulele
+        df['address'] = df['address'].str.replace(r'[^\w\s,]', '', regex=True)
+        # Înlocuirea abrevierilor comune, cum ar fi "St." cu "Street" și "Ave" cu "Avenue", pentru standardizare
+        df['address'] = df['address'].str.replace(r'\bst\b', 'street', regex=True)
+        df['address'] = df['address'].str.replace(r'\bave\b', 'avenue', regex=True)
+        df['address'] = df['address'].str.strip()
+
+    # Curatarea datelor referitoare la numerele de telefon
+    if 'phone' in df.columns:
+        # Atunci cand exista o coloana denumita "phone", numerele de telefon sunt curățate prin eliminarea tuturor caracterelor care nu sunt cifre. Rezulta astfek doar un șir numeric
+        df['phone'] = df['phone'].astype(str).str.replace(r'\D', '', regex=True)
+
+    # Curatarea coloanei "category"
+    if 'category' in df.columns:
+        df['category'] = df['category'].astype(str).str.lower()
+        df['category'] = df['category'].str.replace(r'[^\w\s]', '', regex=True)
+        df['category'] = df['category'].str.strip()
+        # Convertirea coloanei într-un tip de date categoric (category) pentru o eficiență mai bună în procesarea datelor
+        df['category'] = df['category'].astype('category')
+
+    # Aceiasi pasi pentru curatare, dar pentru coloana "categories" din facebook_dataset
+    if 'categories' in df.columns:
+        df['categories'] = df['categories'].astype(str).str.lower()
+        df['categories'] = df['categories'].str.replace(r'[^\w\s]', '', regex=True)
+        df['categories'] = df['categories'].str.strip()
+        df['categories'] = df['categories'].astype('category')
+
+    # Idem, pentru coloana corespunzatoare din website_dataset
+    if 's_category' in df.columns:
+        df['s_category'] = df['s_category'].astype(str).str.lower()
+        df['s_category'] = df['s_category'].str.replace(r'[^\w\s]', '', regex=True)
+        df['s_category'] = df['s_category'].str.strip()
+        df['s_category'] = df['s_category'].astype('category')
+
+    return df
+
+==========================================================================
+
+#  2. Aplicarea functiei de curatare "clean_dataset" pe seturile de date
+
+cleaned_facebook_data = clean_dataset(facebook_data)
+cleaned_google_data = clean_dataset(google_data)
+cleaned_website_data = clean_dataset(website_data)
+
+==========================================================================
+
+# Incep unirea celor trei seturi de date
+  # Seturile de date curățate din Facebook și Google sunt îmbinate folosind coloana "name" ca identificator comun. 
+     Metoda de îmbinare utilizată este "outer", ceea ce înseamnă că toate valorile din ambele seturi de date sunt păstrate, 
+     chiar dacă nu există o corespondență perfectă între ele.
+
+    #Am ales sa unesc cele trei seturi de date dupa coloana "name" (sau "legal_name", în cazul Website) 
+      deoarece aceasta ar trebui să conțină numele companiilor, care, în mod ideal, 
+      sunt un identificator unic pentru fiecare entitate. Acest lucru permite corelarea corectă a informațiilor 
+      despre aceeași companie din surse diferite.
+
+merged_data = pd.merge(cleaned_facebook_data, cleaned_google_data, on='name', how='outer')
+
+==========================================================================
+
+# Pentru a îmbina și datele din Website cu cele din Facebook și Google, 
+   coloana ”legal_name” din setul de date Website este redenumită în ”name”, 
+   pentru a avea astfel un identificator comun.
+
+cleaned_website_data.rename(columns={'legal_name': 'name'}, inplace=True)
+
+==========================================================================
+
+# Datele din Website sunt îmbinate cu setul de date rezultat din Facebook și Google, 
+   folosind aceeași metodă ”outer”.
+
+merged_data = pd.merge(merged_data, cleaned_website_data, on='name', how='outer')
+
+==========================================================================
+
+# Afisez o serie de informatii detaliate despre setul de date nou creat, precum si primele cinci randuri din set.
+
+print(merged_data.info())
+print(merged_data.head())
+
+==========================================================================
+
+# Urmatorul pas consta in cautarea rândurilor unde coloana "name" este null, 
+   ceea ce indică că îmbinarea nu a reușit pentru acele companii.
+
+unmatched = merged_data[merged_data['name'].isnull()]
+print(f"Number of unmatched rows: {len(unmatched)}")
+
+
+==========================================================================
+
+#Pentru a obține un set de date curat, se elimină toate rândurile care au valori lipsă (NaN) în unele dintre coloanele esențiale: 
+  "name", "address_x", "domain_x". Am considerat că este important să păstrez un echilibru între curățarea datelor și păstrarea 
+  unui volum semnificativ de informații. Astfel, în cazul setului de date pe care lucrez, eliminarea tuturor rândurilor cu valori lipsă 
+  și din alte coloane comune, pe lângă cele enumerate anterior, ar fi condus la o reducere drastică a datelor și la o eventuală 
+  pierdere a unor informații potențial valoroase. Astfel, eliminarea rândurilor cu valori lipsă de pe cele trei coloane a fost ca o 
+  soluție de compromis între păstrarea unui volum corespunzător de date și menținerea unei acurateți optime a setului de date.
+
+merged_data = merged_data.dropna(subset=['name','address_x','domain_x'])
+
+
+==========================================================================
+
+# După unirea celor trei seturi de date într-un al patrulea set, am observat faptul că datele disponibile pe o serie 
+   de coloane, ”phone_x”, ”address_y”, "description” etc, sunt fie într-un format neconform (afișaj în format științific), 
+   fie nerelevante (informații cu caracter de descriere în loc de date referitoare la adresă), fie conțin exagerat 
+   de multe date lipsă. Astfel, am decis să elimin toate aceste coloane și să păstrez ca relevante informațiile 
+   de pe alte coloane asemănătoare.
+
+merged_data = merged_data.drop(columns=['city_x','phone_x','phone','address_y','description','categories','s_category',
+                                        'phone_y','zip_code_y','tld','country_code_y','country_name_y','phone_country_code_x',
+                                        'raw_address','domain_y','main_city','main_country'])
+
+
+
+==========================================================================
+
+# După prelucrările efectuate asupra setului de date, am observat totuși destule celule care nu conțin date 
+   de niciun fel, fapt ce consider că poate afecta acuratețea eventualelor analize ulterioare făcute pe aceste date. 
+   Astfel, în celulele unde informațiile lipsesc în totalitate, am ales să scriu un mesaj generic de tipul ”Unknown”, 
+   despre care consider că aduce măcar unele clarificări despre situația înregistrării respective.
+
+# Pasul 1: Convertesc celulele goale in celule care contin valoarea "nan"
+merged_data[['region_name_x', 'region_code_x', 'zip_code_x', 'category', 'city_y', 
+             'phone_country_code_y', 'language', 'main_region',
+             'raw_phone','region_code_y','text','root_domain','domain_suffix','site_name', 'region_name_y',
+             'country_code_x','country_name_x','email']] = \
+merged_data[['region_name_x', 'region_code_x', 'zip_code_x', 'category', 'city_y', 
+             'phone_country_code_y', 'language', 'main_region',
+             'raw_phone','region_code_y','text','root_domain','domain_suffix','site_name', 'region_name_y',
+             'country_code_x','country_name_x','email']].replace(r'^\s*$', np.nan, regex=True)
+
+# Pasul 2: Adaug categoria 'Unknown' fiecarei coloane categoriale, daca aceasta categorie nu exista deja
+for column in ['region_name_x', 'region_code_x', 'zip_code_x', 'category', 'city_y', 
+               'phone_country_code_y', 'language', 'main_region',
+               'raw_phone','region_code_y','text','root_domain','domain_suffix','site_name', 'region_name_y',
+               'country_code_x','country_name_x','email']:
+    if pd.api.types.is_categorical_dtype(merged_data[column]):
+        merged_data[column] = merged_data[column].cat.add_categories('Unknown')
+
+# Pasul 3: Inlocuiesc valorile de tip "nan", precum si valorile lipsa (celulele goale) cu valoarea 'Unknown'
+merged_data[['region_name_x', 'region_code_x', 'zip_code_x', 'category', 'city_y', 
+              'phone_country_code_y', 'language', 'main_region',
+             'raw_phone','region_code_y','text','root_domain','domain_suffix','site_name', 'region_name_y',
+             'country_code_x','country_name_x','email']] = \
+merged_data[['region_name_x', 'region_code_x', 'zip_code_x', 'category', 'city_y', 
+              'phone_country_code_y', 'language', 'main_region',
+             'raw_phone','region_code_y','text','root_domain','domain_suffix','site_name', 'region_name_y',
+             'country_code_x','country_name_x','email']].fillna('Unknown')
+
+
+==========================================================================
+
+# Pasul urmator consta in combinarea informațiilor despre codurile și numele regiunilor din două coloane diferite 
+   ale DataFrame-ului ”merged_data”, creând astfel doua noi coloane care înglobează cele mai precise date 
+   disponibile.
+
+merged_data['combined_region_code'] = merged_data['region_code_x'].where(
+    merged_data['region_code_x'] != 'Unknown', 
+    merged_data['region_code_y']
+)
+
+
+merged_data['combined_region_name'] = merged_data['region_name_x'].where(
+    merged_data['region_name_x'] != 'Unknown', 
+    merged_data['region_name_y']
+)
+
+==========================================================================
+
+# Renunțăm la cele patru coloane pe care le-am contopit anterior.
+
+merged_data = merged_data.drop(columns=['region_code_x','region_code_y','region_name_x','region_name_y'])
+
+==========================================================================
+
+# Odată cu eliminarea coloanelor redundante, putem redenumi numele coloanelor, astfel încât textul acestora 
+   să fie mai clar și mai concis.
+
+new_column_names = {
+    'domain_x': 'domain',
+    'address_x': 'address',
+    'country_code_x': 'country_code',
+    'country_name_x': 'country_name',
+    'zip_code_x': 'zip_code',
+    'city_y': 'city',
+    'phone_country_code_y': 'phone_country_code',
+    'raw_phone': 'phone',
+    'text': 'description'
+}
+
+merged_data.rename(columns=new_column_names, inplace=True)
+
+==========================================================================
+
+# Setul de date îmbinat este exportat într-un fișier CSV pentru eventuale utilizări ulterioare.
+
+merged_data.to_csv('merged_data.csv', index=False)
+
+==========================================================================
+
+# Ca ultim pas, am aplicat o serie de statistici descriptive pentru a vedea conținutul setului de date.
+
+print(merged_data.describe())
+print(merged_data['category'].value_counts())
+
+
+#Am verificat dacă există rânduri duplicat
+duplicate_count = merged_data.duplicated().sum()
+print(f"Number of duplicate entries: {duplicate_count}")
+
+# Am contorizat ce coloane conțin rânduri fără valori asociate și în ce număr se găsesc aceste rânduri
+missing_values = merged_data.isnull().sum()
+print(missing_values[missing_values > 0])
